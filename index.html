@@ -541,11 +541,11 @@
             system_online: false
         };
 
-        // NETPIE Topics - ปรับตาม format ที่ถูกต้อง
+        // NETPIE Topics - แก้ไขให้ถูกต้อง
         const TOPICS = {
-            DATA: '@msg/data',
-            CONTROL: '@msg/control', 
-            STATUS: '@msg/status'
+            DATA: '/data',
+            CONTROL: '/control', 
+            STATUS: '/status'
         };
 
         // Connect to NETPIE
@@ -569,17 +569,18 @@
                 document.getElementById('connectBtn').textContent = '⏳ กำลังเชื่อมต่อ...';
                 document.getElementById('connectBtn').disabled = true;
 
-                // Create MQTT connection
-                const brokerUrl = 'wss://broker.netpie.io:8083/mqtt';
+                // แก้ไข MQTT Broker URL
+                const brokerUrl = 'wss://broker.netpie.io:8883/mqtt';
                 
                 client = mqtt.connect(brokerUrl, {
                     clientId: clientId,
                     username: token,
                     password: secret,
-                    keepalive: 60,
-                    connectTimeout: 4000,
-                    reconnectPeriod: 1000,
-                    clean: true
+                    keepalive: 30,
+                    connectTimeout: 10000,
+                    reconnectPeriod: 5000,
+                    clean: true,
+                    protocolVersion: 4
                 });
 
                 // Connection events
@@ -631,17 +632,25 @@
         function subscribeToTopics() {
             if (!client || !client.connected) return;
 
-            client.subscribe(TOPICS.DATA, function(err) {
+            // แก้ไข topic format
+            const clientId = document.getElementById('clientId').value.trim();
+            const dataTopicPath = `@msg/${clientId}${TOPICS.DATA}`;
+            const statusTopicPath = `@msg/${clientId}${TOPICS.STATUS}`;
+
+            client.subscribe(dataTopicPath, { qos: 0 }, function(err) {
                 if (!err) {
-                    console.log('Subscribed to data topic');
+                    console.log('Subscribed to data topic:', dataTopicPath);
+                    showAlert('สมัครรับข้อมูล sensor แล้ว', 'success');
                 } else {
                     console.error('Failed to subscribe to data topic:', err);
+                    showAlert('สมัครรับข้อมูลไม่สำเร็จ: ' + err.message, 'danger');
                 }
             });
 
-            client.subscribe(TOPICS.STATUS, function(err) {
+            client.subscribe(statusTopicPath, { qos: 0 }, function(err) {
                 if (!err) {
-                    console.log('Subscribed to status topic');
+                    console.log('Subscribed to status topic:', statusTopicPath);
+                    showAlert('สมัครรับสถานะระบบแล้ว', 'success');
                 } else {
                     console.error('Failed to subscribe to status topic:', err);
                 }
@@ -654,14 +663,18 @@
                 const data = JSON.parse(message.toString());
                 console.log('Received message:', topic, data);
 
-                if (topic === TOPICS.DATA) {
+                // ตรวจสอบ topic และอัพเดทข้อมูล
+                if (topic.includes(TOPICS.DATA)) {
                     updateSensorData(data);
-                } else if (topic === TOPICS.STATUS) {
+                    showAlert('ได้รับข้อมูล sensor แล้ว', 'success');
+                } else if (topic.includes(TOPICS.STATUS)) {
                     updateSystemStatus(data);
+                    showAlert('ได้รับสถานะระบบแล้ว', 'success');
                 }
 
             } catch (error) {
                 console.error('Error parsing message:', error);
+                showAlert('ไม่สามารถแปลงข้อมูลได้: ' + error.message, 'danger');
             }
         }
 
@@ -682,274 +695,8 @@
             }
 
             try {
-                client.publish(TOPICS.CONTROL, JSON.stringify(message));
-                console.log('Sent command:', message);
-                return true;
-            } catch (error) {
-                console.error('Error sending command:', error);
-                showAlert('ส่งคำสั่งไม่สำเร็จ: ' + error.message, 'danger');
-                return false;
-            }
-        }
-
-        // Update functions
-        function updateSensorData(data) {
-            sensorData = { ...sensorData, ...data };
-            updateSensorDisplay();
-            updateSystemInfo();
-        }
-
-        function updateSystemStatus(data) {
-            systemStatus = { ...systemStatus, ...data };
-            updatePumpStatus();
-            updateSettings();
-            updateCalibrationStatus();
-        }
-
-        function updateConnectionStatus() {
-            const netpieStatus = document.getElementById('netpieStatus');
-            const deviceStatus = document.getElementById('deviceStatus');
-
-            if (isConnected) {
-                netpieStatus.className = 'status-item status-connected';
-                netpieStatus.innerHTML = '<span class="status-indicator status-on"></span>NETPIE: เชื่อมต่อแล้ว';
+                const clientId = document.getElementById('clientId').value.trim();
+                const controlTopicPath = `@msg/${clientId}${TOPICS.CONTROL}`;
                 
-                deviceStatus.className = 'status-item status-connected';
-                deviceStatus.innerHTML = '<span class="status-indicator status-on"></span>อุปกรณ์: ออนไลน์';
-            } else {
-                netpieStatus.className = 'status-item status-disconnected';
-                netpieStatus.innerHTML = '<span class="status-indicator status-off"></span>NETPIE: ไม่ได้เชื่อมต่อ';
-                
-                deviceStatus.className = 'status-item status-disconnected';
-                deviceStatus.innerHTML = '<span class="status-indicator status-off"></span>อุปกรณ์: ออฟไลน์';
-            }
-        }
-
-        function updateSensorDisplay() {
-            document.getElementById('ecValue').innerHTML = `${sensorData.ec_value}<span class="sensor-unit">ms/cm</span>`;
-            document.getElementById('phValue').textContent = sensorData.ph_value;
-            document.getElementById('tempValue').textContent = `${sensorData.temperature}°C`;
-            document.getElementById('ecVoltage').textContent = `${sensorData.ec_voltage} V`;
-            document.getElementById('phVoltage').textContent = `${sensorData.ph_voltage} V`;
-            document.getElementById('adsStatus').textContent = sensorData.ads_connected ? 'เชื่อมต่อ' : 'ไม่เชื่อมต่อ';
-        }
-
-        function updatePumpStatus() {
-            updatePumpButton('A', systemStatus.pump_a);
-            updatePumpButton('B', systemStatus.pump_b);
-            updatePumpButton('Main', systemStatus.pump_main);
-            
-            document.getElementById('mixingStatus').textContent = systemStatus.mixing ? 'กำลังผสม' : 'หยุด';
-            document.getElementById('mixingStatus').style.color = systemStatus.mixing ? '#27ae60' : '#e74c3c';
-            
-            document.getElementById('volumeRepeatStatus').textContent = systemStatus.volume_repeat ? 'ทำงาน' : 'ไม่ทำงาน';
-        }
-
-        function updatePumpButton(pump, isOn) {
-            const btn = document.getElementById(`pump${pump}Btn`);
-            const indicator = document.getElementById(`pump${pump}Indicator`);
-            
-            if (isOn) {
-                btn.className = 'control-button on';
-                indicator.className = 'status-indicator status-on';
-            } else {
-                btn.className = 'control-button off';
-                indicator.className = 'status-indicator status-off';
-            }
-        }
-
-        function updateSettings() {
-            document.getElementById('ecTarget').value = systemStatus.ec_target;
-            document.getElementById('volumeSetting').value = systemStatus.volume_setting;
-            document.getElementById('currentECTarget').textContent = `${systemStatus.ec_target} ms/cm`;
-            document.getElementById('currentVolume').textContent = `${systemStatus.volume_setting} ml`;
-        }
-
-        function updateCalibrationStatus() {
-            document.getElementById('ecCalStatus').textContent = systemStatus.calibrating_ec ? 'กำลังปรับเทียบ' : 'ปกติ';
-            document.getElementById('ecCalStatus').style.color = systemStatus.calibrating_ec ? '#f39c12' : '#27ae60';
-            
-            document.getElementById('phCalStatus').textContent = systemStatus.calibrating_ph ? 'กำลังปรับเทียบ' : 'ปกติ';
-            document.getElementById('phCalStatus').style.color = systemStatus.calibrating_ph ? '#f39c12' : '#27ae60';
-        }
-
-        function updateSystemInfo() {
-            document.getElementById('wifiRSSI').textContent = `${sensorData.wifi_rssi} dBm`;
-            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('th-TH');
-            document.getElementById('systemTimestamp').textContent = sensorData.timestamp || Date.now().toString();
-            document.getElementById('systemOnline').textContent = systemStatus.system_online ? 'ออนไลน์' : 'ออฟไลน์';
-            document.getElementById('systemOnline').style.color = systemStatus.system_online ? '#27ae60' : '#e74c3c';
-        }
-
-        function showAlert(message, type) {
-            const alertContainer = document.getElementById('alertContainer');
-            const alert = document.createElement('div');
-            alert.className = `alert alert-${type}`;
-            alert.textContent = message;
-            
-            alertContainer.appendChild(alert);
-            
-            setTimeout(() => {
-                if (alert.parentNode) {
-                    alert.remove();
-                }
-            }, 5000);
-        }
-
-        // Control Functions
-        function togglePump(pump) {
-            const command = `pump${pump}_${systemStatus[`pump_${pump.toLowerCase()}`] ? 'off' : 'on'}`;
-            
-            if (sendCommand(command)) {
-                // Update local state immediately for better UX
-                systemStatus[`pump_${pump.toLowerCase()}`] = !systemStatus[`pump_${pump.toLowerCase()}`];
-                updatePumpStatus();
-                showAlert(`${pump === 'Main' ? 'ปั๊มหลัก' : 'ปั๊ม ' + pump} ${systemStatus[`pump_${pump.toLowerCase()}`] ? 'เปิด' : 'ปิด'}แล้ว`, 'success');
-            }
-        }
-
-        function startMixing() {
-            if (sendCommand('start_mixing')) {
-                systemStatus.mixing = true;
-                updatePumpStatus();
-                showAlert('เริ่มการผสมแล้ว', 'success');
-            }
-        }
-
-        function stopMixing() {
-            if (sendCommand('stop_mixing')) {
-                systemStatus.mixing = false;
-                systemStatus.volume_repeat = false;
-                updatePumpStatus();
-                showAlert('หยุดการผสมแล้ว', 'success');
-            }
-        }
-
-        function setECTarget() {
-            const newEC = parseFloat(document.getElementById('ecTarget').value);
-            
-            if (isNaN(newEC) || newEC < 0 || newEC > 50) {
-                showAlert('ค่า EC ต้องอยู่ระหว่าง 0-50 ms/cm', 'danger');
-                return;
-            }
-
-            if (sendCommand('set_ec', newEC)) {
-                systemStatus.ec_target = newEC;
-                updateSettings();
-                showAlert(`ตั้งค่า EC เป้าหมายเป็น ${newEC} ms/cm แล้ว`, 'success');
-            }
-        }
-
-        function setVolume() {
-            const newVolume = parseInt(document.getElementById('volumeSetting').value);
-            
-            if (isNaN(newVolume) || newVolume < 0 || newVolume > 10000) {
-                showAlert('ปริมาณน้ำต้องอยู่ระหว่าง 0-10000 ml', 'danger');
-                return;
-            }
-
-            if (sendCommand('set_volume', newVolume)) {
-                systemStatus.volume_setting = newVolume;
-                updateSettings();
-                showAlert(`ตั้งค่าปริมาณน้ำเป็น ${newVolume} ml แล้ว`, 'success');
-            }
-        }
-
-        function startCalibration(type) {
-            const command = type === 'EC' ? 'EC_CAL' : 'PH_CAL';
-            
-            if (sendCommand(command)) {
-                if (type === 'EC') {
-                    systemStatus.calibrating_ec = true;
-                    showAlert('เข้าสู่โหมดปรับเทียบ EC\nกรุณาเตรียมสารละลายมาตรฐาน', 'warning');
-                } else if (type === 'PH') {
-                    systemStatus.calibrating_ph = true;
-                    showAlert('เข้าสู่โหมดปรับเทียบ pH\nกรุณาเตรียม pH Buffer 7.0 และ 4.0', 'warning');
-                }
-                updateCalibrationStatus();
-            }
-        }
-
-        function confirmCalibration(type) {
-            const command = type === 'EC' ? 'EC_SUCCESS' : 'PH_SUCCESS';
-            
-            if (sendCommand(command)) {
-                if (type === 'EC') {
-                    systemStatus.calibrating_ec = false;
-                    showAlert('ปรับเทียบ EC เสร็จสิ้น', 'success');
-                } else if (type === 'PH') {
-                    systemStatus.calibrating_ph = false;
-                    showAlert('ปรับเทียบ pH เสร็จสิ้น', 'success');
-                }
-                updateCalibrationStatus();
-            }
-        }
-
-        function refreshData() {
-            if (!isConnected) {
-                showAlert('ไม่สามารถรีเฟรชข้อมูลได้ กรุณาเชื่อมต่อ NETPIE', 'danger');
-                return;
-            }
-
-            showAlert('กำลังรีเฟรชข้อมูล...', 'warning');
-            updateSensorDisplay();
-            updateSystemInfo();
-            
-            setTimeout(() => {
-                showAlert('รีเฟรชข้อมูลเรียบร้อย', 'success');
-            }, 500);
-        }
-
-        // Initialize dashboard
-        function initDashboard() {
-            updateConnectionStatus();
-            updateSensorDisplay();
-            updatePumpStatus();
-            updateSettings();
-            updateCalibrationStatus();
-            updateSystemInfo();
-        }
-
-        // Auto-initialize on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            initDashboard();
-        });
-
-        // Keyboard shortcuts
-        document.addEventListener('keydown', function(e) {
-            if (e.ctrlKey) {
-                switch(e.key) {
-                    case 'r':
-                        e.preventDefault();
-                        refreshData();
-                        break;
-                    case 's':
-                        e.preventDefault();
-                        stopMixing();
-                        break;
-                    case 'm':
-                        e.preventDefault();
-                        startMixing();
-                        break;
-                    case 'Enter':
-                        e.preventDefault();
-                        connectToNetpie();
-                        break;
-                }
-            }
-        });
-
-        // Network status monitoring
-        window.addEventListener('online', function() {
-            showAlert('เชื่อมต่ออินเทอร์เน็ตแล้ว', 'success');
-        });
-
-        window.addEventListener('offline', function() {
-            showAlert('เชื่อมต่ออินเทอร์เน็ตขาดหาย', 'danger');
-            isConnected = false;
-            updateConnectionStatus();
-        });
-    </script>
-</body>
-</html>
-            
+                client.publish(controlTopicPath, JSON.stringify(message), { qos: 0 });
+                console
